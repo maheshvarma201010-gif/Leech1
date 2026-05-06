@@ -297,6 +297,8 @@ class TaskConfig:
                 or "STOP_DUPLICATE" not in self.user_dict
                 and Config.STOP_DUPLICATE
             )
+        if not self.merge_video:
+            self.merge_video = bool(self.user_dict.get("MERGE_VIDEO", False))
             default_upload = (
                 self.user_dict.get("DEFAULT_UPLOAD", "") or Config.DEFAULT_UPLOAD
             )
