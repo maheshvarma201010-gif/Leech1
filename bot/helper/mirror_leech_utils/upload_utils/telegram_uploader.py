@@ -321,13 +321,10 @@ class TelegramUploader:
     async def _copy_media(self):
         try:
             if self._bot_pm:
-                await TgClient.bot.copy_message(
+                await TgClient.bot.forward_messages(
                     chat_id=self._listener.user_id,
                     from_chat_id=self._sent_msg.chat.id,
-                    message_id=self._sent_msg.id,
-                    reply_to_message_id=(
-                        self._listener.pm_msg.id if self._listener.pm_msg else None
-                    ),
+                    message_ids=[self._sent_msg.id],
                 )
         except Exception as err:
             if not self._listener.is_cancelled:
@@ -601,10 +598,10 @@ class TelegramUploader:
                                 leech_dest, _ = str(leech_dest).split("|", 1)
                             if leech_dest.lstrip("-").isdigit():
                                 leech_dest = int(leech_dest)
-                        await TgClient.bot.copy_message(
+                        await TgClient.bot.forward_messages(
                             chat_id=leech_dest,
                             from_chat_id=self._sent_msg.chat.id,
-                            message_id=self._sent_msg.id,
+                            message_ids=[self._sent_msg.id],
                         )
                     except Exception as e:
                         if not self._listener.is_cancelled:
