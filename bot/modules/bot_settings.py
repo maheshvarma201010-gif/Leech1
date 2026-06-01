@@ -78,12 +78,12 @@ DEFAULT_VALUES = {
 async def get_buttons(key=None, edit_type=None, edit_mode=False):
     buttons = ButtonMaker()
     if key is None:
-        buttons.data_button("Config Variables", "botset var")
-        buttons.data_button("Private Files", "botset private open")
-        buttons.data_button("Qbit Settings", "botset qbit")
-        buttons.data_button("Aria2c Settings", "botset aria")
-        buttons.data_button("Sabnzbd Settings", "botset nzb")
-        buttons.data_button("JDownloader Sync", "botset syncjd")
+        buttons.data_button("Config Variables", "botset var", style=ButtonStyle.PRIMARY)
+        buttons.data_button("Private Files", "botset private open", style=ButtonStyle.PRIMARY)
+        buttons.data_button("Qbit Settings", "botset qbit", style=ButtonStyle.PRIMARY)
+        buttons.data_button("Aria2c Settings", "botset aria", style=ButtonStyle.PRIMARY)
+        buttons.data_button("Sabnzbd Settings", "botset nzb", style=ButtonStyle.PRIMARY)
+        buttons.data_button("JDownloader Sync", "botset syncjd", style=ButtonStyle.PRIMARY)
         buttons.data_button("Close", "botset close", style=ButtonStyle.DANGER)
         msg = "Bot Settings:"
     elif edit_type is not None:
@@ -142,9 +142,9 @@ async def get_buttons(key=None, edit_type=None, edit_mode=False):
                 continue
             buttons.data_button(k, f"botset botvar {k}")
         if state == "view":
-            buttons.data_button("Edit", "botset edit var")
+            buttons.data_button("Edit", "botset edit var", style=ButtonStyle.PRIMARY)
         else:
-            buttons.data_button("View", "botset view var")
+            buttons.data_button("View", "botset view var", style=ButtonStyle.PRIMARY)
         buttons.data_button("Back", "botset back")
         buttons.data_button("Close", "botset close", style=ButtonStyle.DANGER)
         for x in range(0, len(conf_dict), 10):

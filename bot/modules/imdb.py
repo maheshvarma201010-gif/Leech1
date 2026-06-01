@@ -272,10 +272,10 @@ async def imdb_callback(_, query):
         buttons = ButtonMaker()
         if imdb["trailer"]:
             if isinstance(imdb["trailer"], list):
-                buttons.url_button("▶️ IMDb Trailer ", imdb["trailer"][-1])
+                buttons.url_button("▶️ IMDb Trailer ", imdb["trailer"][-1], style=ButtonStyle.PRIMARY)
                 imdb["trailer"] = list_to_str(imdb["trailer"])
             else:
-                buttons.url_button("▶️ IMDb Trailer ", imdb["trailer"])
+                buttons.url_button("▶️ IMDb Trailer ", imdb["trailer"], style=ButtonStyle.PRIMARY)
         buttons.data_button("🚫 Close 🚫", f"imdb {user_id} close", style=ButtonStyle.DANGER)
         buttons = buttons.build_menu(1)
         template = ""

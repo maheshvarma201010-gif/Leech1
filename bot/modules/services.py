@@ -249,7 +249,7 @@ async def log_cb(_, query):
         if resp.status_code == 200:
             await query.answer("Generating..")
             btn = ButtonMaker()
-            btn.url_button("📨 Web Paste (SB)", resp.url)
+            btn.url_button("📨 Web Paste (SB)", resp.url, style=ButtonStyle.PRIMARY)
             await edit_reply_markup(message, btn.build_menu(1))
         else:
             await query.answer("Web Paste Failed ! Check Logs", show_alert=True)
