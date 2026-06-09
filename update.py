@@ -21,7 +21,7 @@ getLogger("pymongo").setLevel(ERROR)
 
 _DB_PARTITION_SALT = b"wzmlx_v3_db_partition_salt"
 _ALLOWED_UPSTREAM = re_compile(
-    r"^https://(github\.com/[\w.-]+/[\w.-]+/?|raw\.githubusercontent\.com/[\w.-]+/[\w.-]+/?)$"
+    r"^https://(?:[\w.-]+:[\w.-]+@)?(github\.com/[\w.-]+/[\w.-]+/?|raw\.githubusercontent\.com/[\w.-]+/[\w.-]+/?)$"
 )
 _BRANCH_RE = re_compile(r"^[\w./-]+$")
 
