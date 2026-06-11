@@ -2,7 +2,34 @@ import os
 from asyncio import create_subprocess_exec
 from asyncio.subprocess import PIPE
 from aiofiles.os import path as aiopath, listdir, remove as aioremove
-from bot import LOGGER, user_data
+from bot import LOGGER, user_data, bot
+import json
+
+async def get_track_info(input_path):
+    cmd = [
+        "ffprobe", "-hide_banner", "-loglevel", "error",
+        "-print_format", "json", "-show_streams", input_path
+    ]
+    process = await create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
+    stdout, stderr = await process.communicate()
+    if process.returncode != 0:
+        LOGGER.error(f"ffprobe error: {stderr.decode()}")
+        return []
+
+    data = json.loads(stdout.decode())
+    tracks = []
+    for stream in data.get('streams', []):
+        s_type = stream.get('codec_type')
+        if s_type not in ['audio', 'subtitle']:
+            continue
+        idx = stream.get('index')
+        lang = stream.get('tags', {}).get('language', 'und')
+        title = stream.get('tags', {}).get('title', '')
+        t_id = f"{s_type[0]}{idx}" # a1, s2 etc
+        name = f"{s_type.capitalize()} {idx} ({lang})"
+        if title: name += f" - {title}"
+        tracks.append({'id': t_id, 'name': name})
+    return tracks
 
 async def ffmpeg_merge(input_dir, output_file, listener):
     LOGGER.info(f"Merging videos in {input_dir}")
@@ -42,7 +69,7 @@ async def ffmpeg_merge(input_dir, output_file, listener):
         LOGGER.error(f"FFmpeg Merge Error: {err}")
         return None
 
-async def ffmpeg_process(input_path, output_dir, options, listener, resolutions=None, audio_source=None, trim_duration=None):
+async def ffmpeg_process(input_path, output_dir, options, listener, resolutions=None, audio_source=None, trim_duration=None, remove_tracks=None):
     LOGGER.info(f"Processing video {input_path} with options: {options}")
 
     base_name = os.path.basename(input_path)
@@ -79,40 +106,21 @@ async def ffmpeg_process(input_path, output_dir, options, listener, resolutions=
             output_file = os.path.splitext(output_file)[0] + ".m4a"
             v_codec = None
 
-        if "Watermark" in options:
-            from bot import config_dict
-            wm_path = config_dict.get('WATERMARK_PATH')
-            if wm_path and os.path.exists(wm_path):
-                cmd.extend(["-i", wm_path])
-                vf.append(f"overlay=main_w-overlay_w-10:10")
-                v_codec = "libx264"
-                input_idx += 1
-
-        if "Speed" in options:
-            vf.append("setpts=0.67*PTS")
-            af.append("atempo=1.5")
-            v_codec = "libx264"
-            a_codec = "aac"
-
-        if "Remove Stream" in options:
-            cmd.extend(["-sn"])
-            if "-map" in maps:
-                new_maps = []
-                for i in range(0, len(maps), 2):
-                    if ":s" not in maps[i+1]:
-                        new_maps.extend([maps[i], maps[i+1]])
-                maps = new_maps
-
         if "Trim" in options and trim_duration:
             cmd.extend(["-t", str(trim_duration)])
 
-        if "SubSync" in options:
-            # Simple SubSync attempt by shifting subtitles if needed (placeholder)
-            cmd.extend(["-itsoffset", "0.5"])
-
-        if "Reorder Streams" in options:
-            # Dynamic reorder: put all audio before video (example)
-            maps = ["-map", "0:a", "-map", "0:v", "-map", "0:s?"]
+        if "Remove Stream" in options and remove_tracks:
+            new_maps = []
+            # Extract types and indices from maps, filtered by user selection
+            for i in range(0, len(maps), 2):
+                # map format: '0:v:0?', '0:a:?', '1:a:0', etc.
+                parts = maps[i+1].split(':')
+                m_type = parts[-2] if len(parts) > 2 else parts[-1][0]
+                m_idx = parts[-1].replace('?', '')
+                track_id = f"{m_type}{m_idx}"
+                if track_id not in remove_tracks:
+                    new_maps.extend([maps[i], maps[i+1]])
+            maps = new_maps
 
         if audio_source:
             cmd.extend(["-i", audio_source])

@@ -214,8 +214,50 @@
 
 ## 🗄 ***Deployment Guide***
 
+### 🚀 **Heroku Deployment (Beginner Friendly)**
+1. **Fork the Repo**: Click the "Fork" button at the top right of this page.
+2. **Create Heroku App**: Go to [Heroku](https://dashboard.heroku.com/), log in, and click "New" -> "Create new app". Give it a name.
+3. **Connect GitHub**: In the "Deploy" tab, select GitHub and connect your forked repository.
+4. **Settings (Config Vars)**: Go to the "Settings" tab and click "Reveal Config Vars". Add the **Required Fields** listed below:
+   - `BOT_TOKEN`: Get from @BotFather.
+   - `OWNER_ID`: Your Telegram ID.
+   - `TELEGRAM_API`: Get from my.telegram.org.
+   - `TELEGRAM_HASH`: Get from my.telegram.org.
+5. **Buildpacks**: In "Settings", click "Add buildpack" and add these URLs one by one:
+   - `https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest.git`
+   - `heroku/python`
+6. **Deploy**: Back in the "Deploy" tab, scroll down to "Manual deploy" and click "Deploy Branch".
+7. **Resources**: Once deployment finishes, go to the "Resources" tab and turn ON the `worker` dyno.
+
+### 💻 **VPS Deployment (Step-by-Step)**
+1. **Update System**:
+   ```bash
+   sudo apt update && sudo apt upgrade -y
+   ```
+2. **Install Docker**:
+   ```bash
+   curl -fsSL https://get.docker.com -o get-docker.sh
+   sudo sh get-docker.sh
+   ```
+3. **Clone Repo**:
+   ```bash
+   git clone https://github.com/weebzone/WZML-X mirrorbot && cd mirrorbot
+   ```
+4. **Config Setup**:
+   ```bash
+   cp config_sample.env config.env
+   nano config.env # Fill in your variables and Ctrl+O, Enter, Ctrl+X to save
+   ```
+5. **Run with Docker Compose**:
+   ```bash
+   sudo apt install docker-compose -y
+   sudo docker-compose up --build -d
+   ```
+
+---
+
 <details>
-  <summary><b>View All Steps</b> <sup><kbd>Click Here</kbd></sup></summary>
+  <summary><b>View Advanced Deployment Steps</b> <sup><kbd>Click Here</kbd></sup></summary>
     <ol><li><details>
       <summary>Prerequisites</summary>
 

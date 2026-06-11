@@ -1,7 +1,8 @@
-from pyrogram.handlers import CallbackQueryHandler
+from pyrogram.handlers import CallbackQueryHandler, MessageHandler
 from pyrogram.filters import regex, user
-from asyncio import sleep, create_task
+from asyncio import sleep, create_task, Event
 from time import time
+import os
 
 from bot import bot, LOGGER, user_data
 from bot.helper.telegram_helper.message_utils import sendMessage, editMessage, deleteMessage
@@ -13,19 +14,21 @@ vt_sessions = {}
 VT_OPTIONS = [
     "Rename",
     "Video + Video", "Video + Audio",
-    "Video + Subtitle", "SubSync",
-    "Compress", "Convert",
-    "Watermark", "Extract",
-    "Trim", "Remove Stream",
-    "Reorder Streams", "Speed"
+    "Video + Subtitle", "Compress",
+    "Convert", "Extract",
+    "Trim", "Remove Stream"
 ]
 
 RESOLUTIONS = ["144p", "240p", "360p", "480p", "540p", "720p", "1080p"]
 
 async def _timeout_handler(user_id, message_id):
     await sleep(180)
+    message_id = str(message_id)
     if message_id in vt_sessions:
-        menu_msg = vt_sessions[message_id].get('menu_msg')
+        session = vt_sessions[message_id]
+        menu_msg = session.get('menu_msg')
+        if 'event' in session:
+            session['event'].set()
         del vt_sessions[message_id]
         if menu_msg:
             try:
@@ -35,6 +38,7 @@ async def _timeout_handler(user_id, message_id):
 
 def _get_vt_buttons(user_id, message_id):
     buttons = ButtonMaker()
+    message_id = str(message_id)
     session = vt_sessions[message_id]
     options = session['options']
 
@@ -42,28 +46,30 @@ def _get_vt_buttons(user_id, message_id):
     name = f"✅ Rename" if "Rename" in options else "Rename"
     buttons.ibutton(name, f"vt {user_id} {message_id} Rename")
 
-    # Row 2 to 7 (2 columns)
-    for i in range(1, 13, 2):
+    # Other options (2 columns)
+    for i in range(1, len(VT_OPTIONS), 2):
         opt1 = VT_OPTIONS[i]
-        opt2 = VT_OPTIONS[i+1]
         name1 = f"✅ {opt1}" if opt1 in options else opt1
-        name2 = f"✅ {opt2}" if opt2 in options else opt2
         buttons.ibutton(name1, f"vt {user_id} {message_id} {opt1}")
-        buttons.ibutton(name2, f"vt {user_id} {message_id} {opt2}")
+        if i + 1 < len(VT_OPTIONS):
+            opt2 = VT_OPTIONS[i+1]
+            name2 = f"✅ {opt2}" if opt2 in options else opt2
+            buttons.ibutton(name2, f"vt {user_id} {message_id} {opt2}")
 
-    # Row 8: Done (Full Width)
+    # Done (Full Width)
     done_name = "🟩 Done / Start Process"
     if options:
         done_name = f"🟩 Done / Start Process ({len(options)})"
     buttons.ibutton(done_name, f"vt {user_id} {message_id} done")
 
-    # Row 9: Cancel (Full Width)
+    # Cancel (Full Width)
     buttons.ibutton("❌ Cancel", f"vt {user_id} {message_id} cancel")
 
     return buttons.build_menu(2)
 
 def _get_compress_buttons(user_id, message_id):
     buttons = ButtonMaker()
+    message_id = str(message_id)
     selected = vt_sessions[message_id].get('resolutions', [])
     for res in RESOLUTIONS:
         name = f"✅ {res}" if res in selected else res
@@ -71,9 +77,21 @@ def _get_compress_buttons(user_id, message_id):
     buttons.ibutton("💾 Save", f"vt {user_id} {message_id} main", position="footer")
     return buttons.build_menu(3)
 
+def _get_track_buttons(user_id, message_id):
+    buttons = ButtonMaker()
+    message_id = str(message_id)
+    session = vt_sessions[message_id]
+    tracks = session.get('available_tracks', [])
+    selected = session.get('remove_tracks', [])
+    for track in tracks:
+        name = f"❌ {track['name']}" if track['id'] in selected else track['name']
+        buttons.ibutton(name, f"vt {user_id} {message_id} trm {track['id']}")
+    buttons.ibutton("🟩 Done", f"vt {user_id} {message_id} track_done", position="footer")
+    return buttons.build_menu(1)
+
 async def video_tools_menu(client, message, isQbit, isLeech, sameDir, bulk):
     user_id = message.from_user.id
-    message_id = message.id
+    message_id = str(message.id)
 
     vt_sessions[message_id] = {
         'user_id': user_id,
@@ -89,19 +107,18 @@ async def video_tools_menu(client, message, isQbit, isLeech, sameDir, bulk):
     vt_sessions[message_id]['menu_msg'] = menu_msg
     create_task(_timeout_handler(user_id, message_id))
 
-from pyrogram.handlers import MessageHandler
-
 async def _vt_input_handler(client, message, message_id, handler, mode):
     user_id = message.from_user.id
+    message_id = str(message_id)
     if message_id in vt_sessions and vt_sessions[message_id]['user_id'] == user_id:
-        bot.remove_handler(*handler, group=-1) if isinstance(handler, tuple) else bot.remove_handler(handler, group=-1)
+        if handler:
+            bot.remove_handler(*handler, group=-1) if isinstance(handler, tuple) else bot.remove_handler(handler, group=-1)
         if mode == 'rename':
             vt_sessions[message_id]['new_name'] = message.text
             await deleteMessage(message)
             msg = f"<b>Advanced Video Tools Pipeline</b>\nSelect the tools you want to apply:\n\n<b>New Name:</b> <code>{message.text}</code>"
             await editMessage(vt_sessions[message_id]['menu_msg'], msg, _get_vt_buttons(user_id, message_id))
         elif mode == 'audio':
-            # Handle audio link or file
             link = message.text or (message.reply_to_message.link if message.reply_to_message else message.link if message.media else None)
             vt_sessions[message_id]['audio_source'] = link
             await deleteMessage(message)
@@ -118,7 +135,7 @@ async def vt_callback(client, query):
     user_id = query.from_user.id
     data = query.data.split()
     owner_id = int(data[1])
-    message_id = int(data[2])
+    message_id = str(data[2])
     option = " ".join(data[3:])
 
     if user_id != owner_id:
@@ -130,6 +147,7 @@ async def vt_callback(client, query):
     session = vt_sessions[message_id]
 
     if option == "cancel":
+        if 'event' in session: session['event'].set()
         del vt_sessions[message_id]
         await deleteMessage(session['menu_msg'])
         await query.answer("Video Tools cancelled.")
@@ -159,12 +177,21 @@ async def vt_callback(client, query):
         if session.get('new_name'): msg += f"\n\n<b>New Name:</b> <code>{session['new_name']}</code>"
         if session.get('resolutions'): msg += f"\n<b>Resolutions:</b> {', '.join(session['resolutions'])}"
         await editMessage(session['menu_msg'], msg, _get_vt_buttons(user_id, message_id))
+    elif option == "track_done":
+        if 'event' in session:
+            session['event'].set()
     elif option.startswith("res "):
         res = option.split()[1]
         if 'resolutions' not in session: session['resolutions'] = []
         if res in session['resolutions']: session['resolutions'].remove(res)
         else: session['resolutions'].append(res)
         await editMessage(session['menu_msg'], "<b>Select Resolutions to Compress:</b>", _get_compress_buttons(user_id, message_id))
+    elif option.startswith("trm "):
+        tr_id = option.split()[1]
+        if 'remove_tracks' not in session: session['remove_tracks'] = []
+        if tr_id in session['remove_tracks']: session['remove_tracks'].remove(tr_id)
+        else: session['remove_tracks'].append(tr_id)
+        await editMessage(session['menu_msg'], "<b>Select Tracks to REMOVE:</b>", _get_track_buttons(user_id, message_id))
     else:
         if option in session['options']:
             session['options'].remove(option)

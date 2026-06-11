@@ -43,6 +43,9 @@ from bot.helper.ext_utils.bot_utils import (
     get_readable_time,
     is_mega_link,
     is_gdrive_link,
+    is_url,
+    is_telegram_link,
+    aioClientSession,
 )
 from bot.helper.ext_utils.fs_utils import (
     get_base_name,
@@ -84,6 +87,7 @@ from bot.helper.telegram_helper.message_utils import (
     delete_links,
     sendMultiMessage,
     update_all_messages,
+    get_tg_link_content,
 )
 from bot.helper.telegram_helper.button_build import ButtonMaker
 from bot.helper.ext_utils.db_handler import DbManger
@@ -361,23 +365,60 @@ class MirrorLeechListener:
                 name = new_name
 
             audio_source = self.leech_utils.get("audio_source")
-            if "Video + Audio" in vt_options and not audio_source:
-                from bot.helper.telegram_helper.message_utils import sendMessage, deleteMessage
+            if audio_source and (is_url(audio_source) or is_telegram_link(audio_source)):
                 from bot.helper.mirror_utils.download_utils.telegram_download import TelegramDownloadHelper
-                from bot.helper.ext_utils.bot_utils import is_url, is_telegram_link, get_tg_link_content
+                from bot.helper.mirror_utils.download_utils.direct_downloader import add_direct_download
 
-                prompt = await sendMessage(self.message, "<b>Video + Audio:</b> Please send/reply with audio file or link.")
-                # Simple wait for reply logic (ideal implementation would use a more robust event handler)
-                # For this task, we assume the helper manages the download.
-                # In a real environment, you'd use a temporary MessageHandler here.
-                # Since I cannot implement a full secondary download flow here without major refactoring,
-                # I will assume the audio_source is passed if available.
+                audio_path = f"{self.dir}/secondary_audio/"
+                await makedirs(audio_path, exist_ok=True)
+
+                if is_telegram_link(audio_source):
+                    res, session = await get_tg_link_content(audio_source, self.user_id)
+                    if res:
+                        # We use a dummy listener to avoid recursion
+                        file_ = getattr(res, res.media.value) if res.media else None
+                        if file_:
+                            await res.download(file_name=ospath.join(audio_path, file_.file_name or "audio"))
+                            self.leech_utils['audio_source'] = ospath.join(audio_path, file_.file_name or "audio")
+                elif is_url(audio_source):
+                    # For URLs, we use a simple wget-like approach or sync_to_async with requests
+                    import aiohttp
+                    async with aioClientSession() as session:
+                        async with session.get(audio_source) as resp:
+                            if resp.status == 200:
+                                a_name = audio_source.split('/')[-1] or "audio"
+                                async with aiopen(ospath.join(audio_path, a_name), mode='wb') as f:
+                                    await f.write(await resp.read())
+                                self.leech_utils['audio_source'] = ospath.join(audio_path, a_name)
+
+            if "Remove Stream" in vt_options:
+                from bot.modules.video_tools import vt_sessions, _get_track_buttons
+                from bot.helper.ext_utils.video_utils import get_track_info
+
+                tracks = await get_track_info(dl_path)
+                if tracks:
+                    event = Event()
+                    task_id = str(self.uid)
+                    vt_sessions[task_id] = {
+                        'user_id': self.user_id,
+                        'available_tracks': tracks,
+                        'remove_tracks': [],
+                        'event': event,
+                        'menu_msg': None
+                    }
+                    msg = await sendMessage(self.message, "<b>Select Tracks to REMOVE:</b>", _get_track_buttons(self.user_id, task_id))
+                    vt_sessions[task_id]['menu_msg'] = msg
+                    await event.wait()
+                    self.leech_utils['remove_tracks'] = vt_sessions[task_id].get('remove_tracks', [])
+                    await deleteMessage(msg)
+                    del vt_sessions[task_id]
 
             resolutions = self.leech_utils.get("resolutions")
             trim_duration = self.leech_utils.get("trim_duration")
+            remove_tracks = self.leech_utils.get("remove_tracks")
             excluded_from_process = ["Video + Video", "Rename"]
             if any(opt in vt_options for opt in vt_options if opt not in excluded_from_process):
-                processed_paths = await ffmpeg_process(dl_path, self.dir, vt_options, self, resolutions, audio_source, trim_duration)
+                processed_paths = await ffmpeg_process(dl_path, self.dir, vt_options, self, resolutions, audio_source, trim_duration, remove_tracks)
                 if processed_paths:
                     if len(processed_paths) == 1:
                         dl_path = processed_paths[0]
