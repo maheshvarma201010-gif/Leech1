@@ -10,6 +10,7 @@ from aiofiles.os import path as aiopath, remove as aioremove, listdir, makedirs
 from os import walk, path as ospath
 from html import escape
 from aioshutil import move
+from contextlib import suppress
 from asyncio import create_subprocess_exec, sleep, Event
 from pyrogram.enums import ChatType
 
@@ -304,6 +305,68 @@ class MirrorLeechListener:
 
         if self.join and await aiopath.isdir(dl_path):
             await join_files(dl_path)
+
+        vt_options = self.leech_utils.get("vt_options")
+        if vt_options:
+            from bot.helper.ext_utils.video_utils import ffmpeg_merge, ffmpeg_process
+
+            if await aiopath.isfile(dl_path) and is_archive(name):
+                self.extract = True
+
+            if self.extract:
+                pswd = self.extract if isinstance(self.extract, str) else ""
+                try:
+                    if await aiopath.isfile(dl_path):
+                        up_path = get_base_name(dl_path)
+                    LOGGER.info(f"Extracting for VT: {name}")
+                    async with download_dict_lock:
+                        download_dict[self.uid] = ExtractStatus(name, size, gid, self)
+
+                    if await aiopath.isdir(dl_path):
+                        for dirpath, _, files in await sync_to_async(walk, dl_path, topdown=False):
+                            for file_ in files:
+                                if is_first_archive_split(file_) or is_archive(file_) and not file_.endswith(".rar"):
+                                    f_path = ospath.join(dirpath, file_)
+                                    cmd = ["7z", "x", f"-p{pswd}", f_path, f"-o{dirpath}", "-aot", "-xr!@PaxHeader"]
+                                    if not pswd: del cmd[2]
+                                    self.suproc = await create_subprocess_exec(*cmd)
+                                    if await self.suproc.wait() == 0:
+                                        for f in files:
+                                            if is_archive_split(f) or is_archive(f):
+                                                with suppress(Exception): await aioremove(ospath.join(dirpath, f))
+                    else:
+                        cmd = ["7z", "x", f"-p{pswd}", dl_path, f"-o{up_path}", "-aot", "-xr!@PaxHeader"]
+                        if not pswd: del cmd[2]
+                        self.suproc = await create_subprocess_exec(*cmd)
+                        if await self.suproc.wait() == 0:
+                            await aioremove(dl_path)
+                            dl_path = up_path
+                    self.extract = False
+                except Exception as e:
+                    LOGGER.error(f"VT Extraction Error: {e}")
+
+            if "Video + Video" in vt_options and await aiopath.isdir(dl_path):
+                output_file = ospath.join(self.dir, f"{name}_merged.mp4")
+                merged_path = await ffmpeg_merge(dl_path, output_file, self)
+                if merged_path:
+                    dl_path = merged_path
+
+            excluded_from_process = ["Video + Video", "Rename"]
+            if any(opt in vt_options for opt in vt_options if opt not in excluded_from_process):
+                output_file = ospath.join(self.dir, f"{name}_processed.mp4")
+                processed_path = await ffmpeg_process(dl_path, output_file, vt_options, self)
+                if processed_path:
+                    dl_path = processed_path
+
+            if "Rename" in vt_options and (new_name := self.leech_utils.get("new_name")):
+                ext = ospath.splitext(dl_path)[1]
+                new_path = ospath.join(ospath.dirname(dl_path), f"{new_name}{ext}")
+                await move(dl_path, new_path)
+                dl_path = new_path
+
+            # Re-update name and size after VT processing
+            name = ospath.basename(dl_path)
+            size = await get_path_size(dl_path)
 
         if self.extract:
             pswd = self.extract if isinstance(self.extract, str) else ""

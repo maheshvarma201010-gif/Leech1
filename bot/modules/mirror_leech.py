@@ -122,6 +122,7 @@ async def _mirror_leech(
         "-screenshots": "",
         "-t": "",
         "-thumb": "",
+        "-vt": False,
     }
 
     args = arg_parser(input_list[1:], arg_base)
@@ -158,6 +159,7 @@ async def _mirror_leech(
     pssw = args["-p"] or args["-pass"]
     thumb = args["-t"] or args["-thumb"]
     sshots = int(ss) if (ss := (args["-ss"] or args["-screenshots"])).isdigit() else 0
+    vt = args["-vt"]
     bulk_start = 0
     bulk_end = 0
     ratio = None
@@ -469,6 +471,15 @@ async def _mirror_leech(
             await delete_links(message)
             return
 
+    vt_options = sameDir.get("vt_options") if isinstance(sameDir, dict) else None
+    new_name = sameDir.get("new_name") if isinstance(sameDir, dict) else None
+
+    if vt and not vt_options:
+        from bot.modules.video_tools import video_tools_menu
+
+        await video_tools_menu(client, message, isQbit, isLeech, sameDir, bulk)
+        return
+
     listener = MirrorLeechListener(
         message,
         compress,
@@ -485,7 +496,12 @@ async def _mirror_leech(
         drive_id=drive_id,
         index_link=index_link,
         source_url=org_link or link,
-        leech_utils={"screenshots": sshots, "thumb": thumb},
+        leech_utils={
+            "screenshots": sshots,
+            "thumb": thumb,
+            "vt_options": vt_options,
+            "new_name": new_name,
+        },
     )
 
     if file_ is not None:
