@@ -1,0 +1,35 @@
+{
+  "name": "WZML-X",
+  "description": "Telegram mirroring and leeching platform.",
+  "keywords": ["telegram", "bot", "mirror", "leech"],
+  "repository": "https://github.com/SilentDemonSD/WZML-X",
+  "stack": "container",
+  "env": {
+    "BOT_TOKEN": {
+      "description": "Your bot token from @BotFather",
+      "required": true
+    },
+    "TELEGRAM_API": {
+      "description": "Your API ID from my.telegram.org",
+      "required": true
+    },
+    "TELEGRAM_HASH": {
+      "description": "Your API Hash from my.telegram.org",
+      "required": true
+    },
+    "OWNER_ID": {
+      "description": "Your Telegram User ID",
+      "required": true
+    },
+    "DATABASE_URL": {
+      "description": "MongoDB Connection String",
+      "required": true
+    }
+  },
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "eco"
+    }
+  }
+}

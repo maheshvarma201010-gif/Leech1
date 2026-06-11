@@ -325,6 +325,11 @@ async def update_variables():
 
 
 async def load_configurations():
+    from shutil import which
+    for binary in [BinConfig.ARIA2_NAME, BinConfig.QBIT_NAME, BinConfig.FFMPEG_NAME, BinConfig.RCLONE_NAME, BinConfig.SABNZBD_NAME, "yt-dlp", "7z"]:
+        if not which(binary):
+            LOGGER.warning(f"{binary} binary not found! Some features may not work.")
+
     if not await aiopath.exists(".netrc"):
         async with aiopen(".netrc", "w"):
             pass

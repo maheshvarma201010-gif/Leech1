@@ -113,6 +113,9 @@ sabnzbd_client = SabnzbdClient(
     api_key=_sabnzbd_key(),
     port="8070",
 )
-srun([BinConfig.QBIT_NAME, "-d", f"--profile={getcwd()}"], check=False)
+
+from shutil import which
+if which(BinConfig.QBIT_NAME):
+    srun([BinConfig.QBIT_NAME, "-d", f"--profile={getcwd()}"], check=False)
 
 scheduler = AsyncIOScheduler(event_loop=bot_loop)

@@ -1,6 +1,6 @@
 from asyncio import sleep
 from pyrogram.handlers import MessageHandler, CallbackQueryHandler
-from pyrogram.filters import regex, user, reply
+from pyrogram.filters import regex, user, reply, chat
 from pyrogram.enums import ButtonStyle
 from time import time
 
@@ -15,6 +15,88 @@ from ..helper.telegram_helper.message_utils import (
 from ..helper.ext_utils.bot_utils import new_task
 
 vt_sessions = {}
+
+async def start_collection_flow(mirror_obj):
+    user_id = mirror_obj.user_id
+    message = mirror_obj.message
+    target_count = mirror_obj.multi
+
+    collection_data = {
+        "user_id": user_id,
+        "target_count": target_count,
+        "collected_items": [],
+        "mirror_obj": mirror_obj,
+        "status_msg": None,
+        "last_interaction": time()
+    }
+
+    msg_text = f"<b>Collection Mode Enabled</b>\n\n✓ Waiting for {target_count} files/links...\nProgress: 0/{target_count}"
+    btns = ButtonMaker()
+    btns.data_button("Cancel", f"vtcoll {message.id} cancel", style=ButtonStyle.DANGER)
+
+    status_msg = await send_message(message, msg_text, btns.build_menu(1))
+    collection_data["status_msg"] = status_msg
+    vt_sessions[f"coll_{message.id}"] = collection_data
+
+    async def _collection_cb(client, msg):
+        if msg.from_user.id != user_id or msg.chat.id != message.chat.id:
+            return
+
+        item = None
+        if msg.document or msg.video or msg.audio or msg.photo:
+            item = msg
+        elif msg.text:
+            from ..helper.ext_utils.links_utils import is_url
+            if is_url(msg.text):
+                item = msg.text
+
+        if item:
+            collection_data["collected_items"].append(item)
+            curr = len(collection_data["collected_items"])
+
+            if curr >= target_count:
+                client.remove_handler(handler, group=-1)
+                await edit_message(status_msg, f"<b>✓ {curr}/{target_count} files received.</b>\nClick 'Done' to proceed to Video Tools menu.")
+                done_btns = ButtonMaker()
+                done_btns.data_button("Done", f"vtcoll {message.id} done", style=ButtonStyle.SUCCESS)
+                done_btns.data_button("Cancel", f"vtcoll {message.id} cancel", style=ButtonStyle.DANGER)
+                await edit_message(status_msg, f"<b>✓ {curr}/{target_count} files received.</b>", done_btns.build_menu(2))
+            else:
+                await edit_message(status_msg, f"<b>Collection Mode Enabled</b>\n\n✓ Waiting for {target_count} files/links...\nProgress: {curr}/{target_count}")
+
+    handler = TgClient.bot.add_handler(MessageHandler(_collection_cb, filters=chat(message.chat.id) & user(user_id)), group=-1)
+    collection_data["handler"] = handler
+
+@new_task
+async def collection_callback(_, query):
+    data = query.data.split()
+    msg_id = data[1]
+    action = data[2]
+    session_key = f"coll_{msg_id}"
+
+    if session_key not in vt_sessions:
+        await query.answer("Session expired!", show_alert=True)
+        return
+
+    sess = vt_sessions[session_key]
+    if query.from_user.id != sess["user_id"]:
+        await query.answer("Not yours!", show_alert=True)
+        return
+
+    if action == "cancel":
+        TgClient.bot.remove_handler(sess["handler"], group=-1)
+        vt_sessions.pop(session_key)
+        await delete_message(query.message)
+        await query.answer("Collection cancelled!")
+    elif action == "done":
+        mirror_obj = sess["mirror_obj"]
+        mirror_obj.vt_collection = sess["collected_items"]
+        TgClient.bot.remove_handler(sess["handler"], group=-1)
+        vt_sessions.pop(session_key)
+        await delete_message(query.message)
+        await display_video_tools_menu(mirror_obj)
+
+TgClient.bot.add_handler(CallbackQueryHandler(collection_callback, filters=regex("^vtcoll")))
 
 async def display_video_tools_menu(mirror_obj):
     user_id = mirror_obj.user_id
@@ -175,6 +257,15 @@ async def vt_callback(_, query):
         await query.answer("Starting task...", show_alert=True)
         mirror_obj = vt_data["obj"]
         mirror_obj.vt_data = vt_data
+
+        # If we have collected items, we need to handle them
+        if hasattr(mirror_obj, "vt_collection") and mirror_obj.vt_collection:
+            # Re-initialize bulk with collected items
+            mirror_obj.bulk = mirror_obj.vt_collection
+            mirror_obj.multi = len(mirror_obj.bulk)
+            # Set video_video merge to true by default for collection mode
+            mirror_obj.vt_data["video_video"] = True
+
         vt_sessions.pop(session_id)
         await delete_message(query.message)
         await mirror_obj.new_event()

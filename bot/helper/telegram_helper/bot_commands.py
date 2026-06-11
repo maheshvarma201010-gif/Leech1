@@ -56,6 +56,7 @@ class BotCommands:
         "NzbSearch": ["nzbsearch", "ns"],
         "GenPyroSess": "exportsession",
         "Plugins": "plugins",
+        "Health": "health",
     }
 
     @classmethod

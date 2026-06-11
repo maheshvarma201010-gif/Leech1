@@ -490,10 +490,13 @@ def _build_command_map():
 
 def resolve_command(command_str):
     cmd_name = command_str.strip().lstrip("/").split(maxsplit=1)[0]
+    if "@" in cmd_name:
+        cmd_name = cmd_name.split("@", 1)[0]
+    if Config.CMD_SUFFIX and cmd_name.endswith(Config.CMD_SUFFIX):
+        cmd_name = cmd_name[: -len(Config.CMD_SUFFIX)]
+
     mapping = _build_command_map()
     handler = mapping.get(cmd_name)
-    if handler is None and Config.CMD_SUFFIX:
-        handler = mapping.get(cmd_name + Config.CMD_SUFFIX)
     if handler is None:
         LOGGER.warning(f"Unknown command '{cmd_name}' (from '{command_str}')")
     return handler

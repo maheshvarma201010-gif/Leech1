@@ -22,6 +22,13 @@ def add_handlers():
     )
     TgClient.bot.add_handler(
         MessageHandler(
+            health_check,
+            filters=command(BotCommands.HealthCommand, case_sensitive=True)
+            & CustomFilters.sudo,
+        )
+    )
+    TgClient.bot.add_handler(
+        MessageHandler(
             unauthorize,
             filters=command(BotCommands.UnAuthorizeCommand, case_sensitive=True)
             & CustomFilters.sudo,

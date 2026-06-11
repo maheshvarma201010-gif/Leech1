@@ -72,6 +72,8 @@ class Config:
     EXTRACT_LIMIT = 0
     ARCHIVE_LIMIT = 0
     STORAGE_LIMIT = 0
+    STATUS_LIMIT = 10
+    STATUS_UPDATE_INTERVAL = 15
     LEECH_DUMP_CHAT = ""
     LINKS_LOG_ID = ""
     MIRROR_LOG_ID = ""

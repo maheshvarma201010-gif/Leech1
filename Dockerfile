@@ -1,10 +1,26 @@
-FROM mysterysd/wzmlx:v3
+FROM python:3.12-slim-bookworm
 
 WORKDIR /usr/src/app
+RUN chmod 777 /usr/src/app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ffmpeg \
+    aria2 \
+    qbittorrent-nox \
+    curl \
+    unzip \
+    7z \
+    p7zip-full \
+    p7zip-rar \
+    libmagic1 \
+    build-essential \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN uv pip install --python /wzvenv/bin/python --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENTRYPOINT ["bash", "start.sh"]
+CMD ["bash", "start.sh"]
