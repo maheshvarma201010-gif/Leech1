@@ -136,6 +136,7 @@ class TaskConfig:
         self.user_trans = False
         self.is_rss = getattr(self.message, "_rss_trigger", False)
         self.progress = True
+        self.vt_data = kwargs.get("vt_data", {})
         self.ffmpeg_cmds = None
         self.metadata_title = None
         self.chat_thread_id = None
@@ -631,6 +632,7 @@ class TaskConfig:
             bulk=self.bulk,
             multi_tag=self.multi_tag,
             options=self.options,
+            vt_data=self.vt_data,
         ).new_event()
 
     async def init_bulk(self, input_list, bulk_start, bulk_end, obj):
@@ -675,6 +677,7 @@ class TaskConfig:
                 bulk=self.bulk,
                 multi_tag=self.multi_tag,
                 options=self.options,
+                vt_data=self.vt_data,
             ).new_event()
         except Exception:
             await send_message(

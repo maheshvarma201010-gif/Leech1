@@ -66,6 +66,7 @@ class Mirror(TaskListener):
         bulk=None,
         multi_tag=None,
         options="",
+        vt_data=None,
         **kwargs,
     ):
         if same_dir is None:
@@ -78,7 +79,7 @@ class Mirror(TaskListener):
         self.options = options
         self.same_dir = same_dir
         self.bulk = bulk
-        super().__init__()
+        super().__init__(vt_data=vt_data)
         self.is_qbit = is_qbit
         self.is_leech = is_leech
         self.is_jd = is_jd
@@ -131,6 +132,7 @@ class Mirror(TaskListener):
             "-cv": "",
             "-ns": "",
             "-tl": "",
+            "-vt": False,
             "-ff": set(),
         }
 
@@ -184,6 +186,7 @@ class Mirror(TaskListener):
         self.folder_name = f"/{args['-m']}".rstrip("/") if len(args["-m"]) > 0 else ""
         self.bot_trans = args["-bt"]
         self.user_trans = args["-ut"]
+        self.vt_flag = args["-vt"]
         self.is_yt = args["-yt"]
         self.metadata_dict = self.default_metadata_dict.copy()
         self.audio_metadata_dict = self.audio_metadata_dict.copy()
@@ -316,6 +319,7 @@ class Mirror(TaskListener):
                 self.bulk,
                 self.multi_tag,
                 self.options,
+                self.vt_data,
             ).new_event()
             return
 
@@ -368,6 +372,12 @@ class Mirror(TaskListener):
 
         if len(self.link) > 0:
             LOGGER.info(self.link)
+
+        if self.vt_flag and not self.vt_data:
+            from .video_tools import display_video_tools_menu
+
+            await display_video_tools_menu(self)
+            return
 
         try:
             await self.before_start()

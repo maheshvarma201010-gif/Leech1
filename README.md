@@ -50,7 +50,36 @@
    - [Support](#support)
    - [Credits](#credits)
    - [License](#license)
+- [Video Tools (-vt) Pipeline Deployment Guide](#video-tools--vt-pipeline-deployment-guide)
 </details>
+
+## Video Tools (-vt) Pipeline Deployment Guide
+
+The Advanced Video Tools (-vt) pipeline allows users to perform multi-select video processing tasks such as merging, muxing audio, compressing to multiple resolutions, and removing specific streams.
+
+### Prerequisites
+- **FFmpeg**: Ensure FFmpeg is installed in your environment. The bot uses it for all video processing tasks.
+- **Python Dependencies**: All necessary libraries are included in `requirements.txt`.
+
+### Step-by-Step Setup
+
+1. **Deploy the Bot**: Follow the standard WZML-X deployment instructions for VPS or Heroku.
+2. **Environment Variables**:
+   - No additional environment variables are required for basic `-vt` functionality.
+   - Ensure `FFMPEG_NAME` in your config points to the correct FFmpeg binary (default is `ffmpeg`).
+3. **Usage**:
+   - To use the Video Tools, add the `-vt` flag to your mirror or leech command.
+   - Example: `/leech -vt https://link-to-video.mp4` or `/mirror -vt` (as a reply to a file).
+   - An interactive menu will appear allowing you to select multiple tools.
+4. **Tool-Specific Info**:
+   - **Video + Video**: Extracts archives and merges all contained video files alphabetically.
+   - **Video + Audio**: Prompts you to send an audio source after the main download completes.
+   - **Compress**: Allows selecting multiple resolutions (144p to 1080p) simultaneously.
+   - **Remove Stream**: Displays all available tracks in the video and lets you select which ones to keep.
+
+### Troubleshooting
+- If FFmpeg fails, check the logs for specific errors. It may be due to incompatible codecs in the source file.
+- Ensure the bot has enough disk space for processing, especially when merging or compressing large files.
 
 ## At a Glance
 
