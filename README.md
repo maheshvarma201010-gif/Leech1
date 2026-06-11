@@ -51,6 +51,7 @@
    - [Credits](#credits)
    - [License](#license)
 - [Video Tools (-vt) Pipeline Deployment Guide](#video-tools--vt-pipeline-deployment-guide)
+- [User Settings Import/Export](#user-settings-importexport)
 </details>
 
 ## Video Tools (-vt) Pipeline Deployment Guide
@@ -75,7 +76,11 @@ The Advanced Video Tools (-vt) pipeline allows users to perform multi-select vid
    - **Video + Video**: Extracts archives and merges all contained video files alphabetically.
    - **Video + Audio**: Prompts you to send an audio source after the main download completes.
    - **Compress**: Allows selecting multiple resolutions (144p to 1080p) simultaneously.
-   - **Remove Stream**: Displays all available tracks in the video and lets you select which ones to keep.
+- **Remove Stream**: Displays all available tracks in the video and lets you select which ones to remove (❌).
+
+## User Settings Import/Export
+- **Export Settings**: Click the button in `/uset` to zip all your custom settings (Captions, Thumbnails, Tokens, etc.) and receive it in your PM.
+- **Import Settings**: Use the "Import Settings" button in `/uset` and follow the prompt to upload your backup zip file. This restores all settings and files instantly, making bot migration a breeze!
 
 ### Troubleshooting
 - If FFmpeg fails, check the logs for specific errors. It may be due to incompatible codecs in the source file.
@@ -131,6 +136,19 @@ Deploy with Docker and provide the required configuration values. The container 
    ```
 
    Use this when you want the simplest full deployment path.
+</details>
+
+<details>
+   <summary>Heroku Deployment</summary>
+
+   1. **Create Heroku App**: Sign in to Heroku and create a new app.
+   2. **Add Buildpacks**: Add `heroku/python` and `https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest.git`.
+   3. **Set Config Vars**: Add all required variables from `config_sample.py` (e.g., `BOT_TOKEN`, `TELEGRAM_API`, etc.).
+   4. **Connect GitHub**: Connect your repository to the Heroku app.
+   5. **Deploy Branch**: Manual or automatic deploy from the main branch.
+   6. **Start Dyno**: In the "Resources" tab, enable the `worker` dyno.
+
+   *Note: Ensure your MongoDB is accessible from Heroku.*
 </details>
 
 <details>

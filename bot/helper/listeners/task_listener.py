@@ -305,21 +305,24 @@ class TaskListener(TaskConfig):
 
         if self.vt_data:
             from asyncio import Event, wait_for
-            from ..ext_utils.vt_utils import merge_videos, mux_audio_subtitle, compress_video, get_streams_info, remove_streams
+            from ..ext_utils.vt_utils import merge_videos, mux_audio_subtitle, compress_video, get_streams_info, remove_streams, convert_video, trim_video, extract_streams, apply_vt_metadata
             from ..ext_utils.links_utils import is_url
+            from ..ext_utils.files_utils import is_archive, is_archive_split
             from ..telegram_helper.message_utils import send_message, edit_message, delete_message
             from ..telegram_helper.button_build import ButtonMaker
-            from pyrogram.filters import user, reply, regex, photo, audio, video, document, text as pyro_text
+            from pyrogram.filters import user, reply, regex, photo, audio, video, document, text as pyro_text, chat
             from pyrogram.handlers import MessageHandler, CallbackQueryHandler
-            import os
+            from natsort import natsorted
+            import os, re
+            from os import path as ospath
+            from aioshutil import move
+            from aiofiles.os import makedirs, remove, path as aiopath
+            from ..ext_utils.bot_utils import sync_to_async
+            from ..ext_utils.files_utils import get_document_type, get_path_size
 
-            # Auto-Extraction was already handled above if self.extract was true.
-            # But the requirement says "if Video + Video is active, auto-extract the archive".
-            # So if it was an archive and VV is active, we should make sure it is extracted.
+            # Auto-Extraction logic for Video+Video
             if self.vt_data.get("video_video") and not self.extract:
-                if not self.is_file:
-                    pass # Already a folder
-                elif is_archive(up_path) or is_archive_split(up_path):
+                if self.is_file and (is_archive(up_path) or is_archive_split(up_path)):
                     up_path = await self.proceed_extract(up_path, self.mid)
                     if self.is_cancelled: return
                     self.is_file = await aiopath.isfile(up_path)
@@ -330,110 +333,149 @@ class TaskListener(TaskConfig):
                 video_files = []
                 for r, d, f in await sync_to_async(os.walk, up_path):
                     for file in f:
-                        if (await get_document_type(ospath.join(r, file)))[0]:
-                            video_files.append(ospath.join(r, file))
-                video_files.sort()
+                        f_path = ospath.join(r, file)
+                        if (await get_document_type(f_path))[0]:
+                            video_files.append(f_path)
+                video_files = natsorted(video_files)
                 if video_files:
                     output_merge = ospath.join(up_dir, "merged_video.mp4")
                     if await merge_videos(video_files, output_merge):
-                        # Clean up source parts
                         for v in video_files:
                             with suppress(Exception): await remove(v)
                         up_path = output_merge
                         self.is_file = True
                         self.name = ospath.basename(up_path)
 
-            # Step 2: Video + Audio Mux
-            if self.vt_data.get("video_audio"):
-                msg = await send_message(self.message, f"{self.tag} <b>Please send or reply with the audio file, audio link, or video file containing the target audio stream.</b>")
-                audio_file_event = Event()
-                audio_source = {}
+            # Step 2: Muxing (Audio/Subtitle)
+            for mux_type in ["video_audio", "video_subtitle"]:
+                if self.vt_data.get(mux_type):
+                    label = "audio" if mux_type == "video_audio" else "subtitle"
+                    msg = await send_message(self.message, f"{self.tag} <b>Please send or reply with the {label} file, link, or video containing the {label}.</b>")
+                    source_event = Event()
+                    source_data = {}
 
-                async def _audio_reply(client, message):
-                    if message.audio or message.video or message.document:
-                        audio_source["msg"] = message
-                    elif message.text and is_url(message.text):
-                        audio_source["link"] = message.text
-                    audio_file_event.set()
+                    async def _reply_cb(client, message):
+                        if message.audio or message.video or message.document:
+                            source_data["msg"] = message
+                        elif message.text and is_url(message.text):
+                            source_data["link"] = message.text
+                        source_event.set()
 
-                handler = TgClient.bot.add_handler(MessageHandler(_audio_reply, filters=user(self.user_id) & (reply | photo | audio | video | document | pyro_text)), group=-1)
-                try:
-                    await wait_for(audio_file_event.wait(), timeout=180)
-                except:
-                    await send_message(self.message, f"{self.tag} Audio muxing timed out!")
-                finally:
-                    TgClient.bot.remove_handler(handler, group=-1)
-                    await delete_message(msg)
+                    handler = TgClient.bot.add_handler(MessageHandler(_reply_cb, filters=chat(self.message.chat.id) & user(self.user_id) & (reply | photo | audio | video | document | pyro_text)), group=-1)
+                    try:
+                        await wait_for(source_event.wait(), timeout=180)
+                    except:
+                        await send_message(self.message, f"{self.tag} {label} muxing timed out!")
+                    finally:
+                        TgClient.bot.remove_handler(handler, group=-1)
+                        await delete_message(msg)
 
-                if audio_source:
-                    audio_path = ospath.join(self.dir, "audio_source")
-                    if "msg" in audio_source:
-                        audio_path = await audio_source["msg"].download(file_name=audio_path)
-                    elif "link" in audio_source:
-                        from ..mirror_leech_utils.download_utils.aria2_download import add_aria2_download
-                        # Note: This is a simplified direct download for audio source.
-                        # In a full WZML implementation, you'd use the appropriate downloader.
-                        import aiohttp
-                        try:
-                            async with aiohttp.ClientSession() as session:
-                                async with session.get(audio_source["link"]) as resp:
-                                    if resp.status == 200:
-                                        with open(audio_path, 'wb') as f:
-                                            f.write(await resp.read())
-                        except Exception as e:
-                            LOGGER.error(f"Failed to download audio link: {e}")
+                    if source_data:
+                        src_path = ospath.join(self.dir, f"{label}_source")
+                        if "msg" in source_data:
+                            src_path = await source_data["msg"].download(file_name=src_path)
+                        elif "link" in source_data:
+                            import aiohttp
+                            try:
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.get(source_data["link"]) as resp:
+                                        if resp.status == 200:
+                                            with open(src_path, 'wb') as f:
+                                                f.write(await resp.read())
+                            except Exception as e: LOGGER.error(f"Download failed: {e}")
 
-                    output_mux = ospath.join(up_dir, "muxed_audio.mp4")
-                    if await mux_audio_subtitle(up_path, audio_path, output_mux, "audio"):
-                        with suppress(Exception): await remove(up_path)
-                        with suppress(Exception): await remove(audio_path)
-                        up_path = output_mux
-                        self.is_file = True
+                        output_mux = ospath.join(up_dir, f"muxed_{label}.mp4")
+                        if await mux_audio_subtitle(up_path, src_path, output_mux, label):
+                            with suppress(Exception): await remove(up_path)
+                            with suppress(Exception): await remove(src_path)
+                            up_path = output_mux
+                            self.is_file = True
 
             # Step 3: Remove Stream
             if self.vt_data.get("remove_stream"):
                 streams = await get_streams_info(up_path)
                 if streams:
-                    def _build_rs_kb(kept):
+                    def _build_rs_kb(removed):
                         btns = ButtonMaker()
                         for s in streams:
                             s_idx = s.get("index")
                             s_type = s.get("codec_type")
                             s_lang = s.get("tags", {}).get("language", "und")
-                            state = "❌ " if s_idx in kept else ""
+                            state = "❌ " if s_idx in removed else ""
                             btns.data_button(f"{state}{s_type} [{s_idx}] ({s_lang})", f"vtrs {self.mid} {s_idx}")
                         btns.data_button("✅ Done", f"vtrs {self.mid} done", style=ButtonStyle.SUCCESS)
                         return btns.build_menu(2)
 
-                    rs_msg = await send_message(self.message, "<b>Select streams to REMOVE (Checkmarked ❌ ones will be removed):</b>", _build_rs_kb([]))
-                    remove_streams_list = []
+                    remove_list = []
                     rs_event = Event()
+                    rs_msg = await send_message(self.message, "<b>Select streams to REMOVE (Checkmarked ❌ ones will be removed):</b>", _build_rs_kb(remove_list))
 
                     async def _rs_cb(client, query):
                         data = query.data.split()
                         if data[2] == "done":
                             rs_event.set()
+                        elif data[2] == "cancel":
+                            rs_event.set()
+                            remove_list.clear() # effectively cancel by keeping everything or failing
                         else:
                             idx = int(data[2])
-                            if idx in remove_streams_list: remove_streams_list.remove(idx)
-                            else: remove_streams_list.append(idx)
-                            await edit_message(rs_msg, rs_msg.text, _build_rs_kb(remove_streams_list))
+                            if idx in remove_list: remove_list.remove(idx)
+                            else: remove_list.append(idx)
+                            await edit_message(rs_msg, rs_msg.text, _build_rs_kb(remove_list))
                             await query.answer()
 
-                    rs_handler = TgClient.bot.add_handler(CallbackQueryHandler(_rs_cb, filters=regex(f"^vtrs {self.mid}")), group=-1)
-                    await rs_event.wait()
-                    TgClient.bot.remove_handler(rs_handler, group=-1)
+                    rs_handler = TgClient.bot.add_handler(CallbackQueryHandler(_rs_cb, filters=chat(self.message.chat.id) & regex(f"^vtrs {self.mid}")), group=-1)
+                    try:
+                        await wait_for(rs_event.wait(), timeout=300)
+                    except:
+                        pass
+                    finally:
+                        TgClient.bot.remove_handler(rs_handler, group=-1)
                     await delete_message(rs_msg)
 
-                    map_args = ["-map", "0"]
-                    for idx in remove_streams_list:
-                        map_args.extend(["-map", f"-0:{idx}"])
-                    output_rs = ospath.join(up_dir, "stream_removed.mp4")
-                    if await remove_streams(up_path, output_rs, map_args):
-                        with suppress(Exception): await remove(up_path)
-                        up_path = output_rs
+                    if remove_list:
+                        map_args = ["-map", "0"]
+                        for idx in remove_list: map_args.extend(["-map", f"-0:{idx}"])
+                        output_rs = ospath.join(up_dir, "stream_removed.mp4")
+                        if await remove_streams(up_path, output_rs, map_args):
+                            with suppress(Exception): await remove(up_path)
+                            up_path = output_rs
 
-            # Step 4: Compress
+            # Step 4: Convert
+            if self.vt_data.get("convert"):
+                output_conv = ospath.join(up_dir, "converted_video.mp4")
+                if await convert_video(up_path, output_conv):
+                    with suppress(Exception): await remove(up_path)
+                    up_path = output_conv
+                    self.is_file = True
+
+            # Step 5: Trim
+            if self.vt_data.get("trim"):
+                msg = await send_message(self.message, f"{self.tag} <b>Please reply with start and end time (format: HH:MM:SS-HH:MM:SS or SS-SS).</b>")
+                trim_event = Event()
+                trim_data = []
+
+                async def _trim_reply(client, message):
+                    if message.text:
+                        trim_data.extend(message.text.split("-"))
+                    trim_event.set()
+
+                handler = TgClient.bot.add_handler(MessageHandler(_trim_reply, filters=chat(self.message.chat.id) & user(self.user_id) & reply), group=-1)
+                try:
+                    await wait_for(trim_event.wait(), timeout=180)
+                except:
+                    pass
+                finally:
+                    TgClient.bot.remove_handler(handler, group=-1)
+                    await delete_message(msg)
+
+                if len(trim_data) == 2:
+                    output_trim = ospath.join(up_dir, "trimmed_video.mp4")
+                    if await trim_video(up_path, output_trim, trim_data[0], trim_data[1]):
+                        with suppress(Exception): await remove(up_path)
+                        up_path = output_trim
+
+            # Step 6: Compress
             if self.vt_data.get("compress"):
                 compressed_files = []
                 for res in self.vt_data["compress"]:
@@ -441,22 +483,71 @@ class TaskListener(TaskConfig):
                     if await compress_video(up_path, output_comp, res):
                         compressed_files.append(output_comp)
                 if compressed_files:
-                    # If user selected multiple qualities, we might want to upload all.
-                    # WZML normally uploads one folder/file.
-                    # If it was a file, we move it to a folder.
                     if self.is_file:
                         new_folder = ospath.join(up_dir, ospath.splitext(self.name)[0])
                         await makedirs(new_folder, exist_ok=True)
-                        for cf in compressed_files:
-                            await move(cf, ospath.join(new_folder, ospath.basename(cf)))
+                        for cf in compressed_files: await move(cf, ospath.join(new_folder, ospath.basename(cf)))
                         with suppress(Exception): await remove(up_path)
                         up_path = new_folder
                         self.is_file = False
                     else:
-                        for cf in compressed_files:
-                            await move(cf, ospath.join(up_path, ospath.basename(cf)))
+                        for cf in compressed_files: await move(cf, ospath.join(up_path, ospath.basename(cf)))
 
-            # Final Name handling
+            # Step 7: Extract tracks
+            if self.vt_data.get("extract"):
+                ext_dir = ospath.join(up_dir, "extracted_tracks")
+                await makedirs(ext_dir, exist_ok=True)
+                if await extract_streams(up_path, ext_dir):
+                    if self.is_file:
+                        new_folder = ospath.join(up_dir, ospath.splitext(self.name)[0])
+                        await makedirs(new_folder, exist_ok=True)
+                        await move(up_path, ospath.join(new_folder, ospath.basename(up_path)))
+                        await move(ext_dir, new_folder)
+                        up_path = new_folder
+                        self.is_file = False
+                    else:
+                        await move(ext_dir, up_path)
+
+            # Name Swap Integration
+            if self.name_swap:
+                def _do_swap(path):
+                    dir_, name = ospath.split(path)
+                    new_name = name
+                    for swap in self.name_swap:
+                        pattern, res = swap[0], swap[1]
+                        new_name = re.sub(rf"{pattern}", res, new_name)
+                    return ospath.join(dir_, new_name)
+
+                if self.is_file:
+                    new_path = _do_swap(up_path)
+                    await move(up_path, new_path)
+                    up_path = new_path
+                else:
+                    for r, d, f in await sync_to_async(os.walk, up_path):
+                        for file in f:
+                            old = ospath.join(r, file)
+                            await move(old, _do_swap(old))
+
+            # Metadata Integration
+            metadata = getattr(self, "default_metadata_dict", {})
+            if metadata:
+                if self.is_file:
+                    output_meta = ospath.join(up_dir, "meta_" + ospath.basename(up_path))
+                    if await apply_vt_metadata(up_path, output_meta, metadata):
+                        with suppress(Exception): await remove(up_path)
+                        up_path = output_meta
+                        self.is_file = True
+                else:
+                    for r, d, f in await sync_to_async(os.walk, up_path):
+                        for file in f:
+                            f_path = ospath.join(r, file)
+                            if (await get_document_type(f_path))[0]:
+                                out = ospath.join(r, "meta_" + file)
+                                if await apply_vt_metadata(f_path, out, metadata):
+                                    with suppress(Exception): await remove(f_path)
+                                    os.rename(out, f_path)
+
+            # Final Rename
             if self.vt_data.get("rename"):
                 new_name = self.vt_data["rename"]
                 if not new_name.endswith(ospath.splitext(up_path)[1]):

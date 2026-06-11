@@ -8,9 +8,13 @@ from os import getcwd
 from re import sub
 from time import time
 
-from aiofiles.os import makedirs, remove
+from aiofiles.os import makedirs, remove, rename as aiorename
 from aiofiles.os import path as aiopath
 from langcodes import Language
+import json
+import zipfile
+import os
+import shutil
 from pyrogram.filters import create
 from pyrogram.handlers import MessageHandler
 
@@ -325,6 +329,11 @@ Here I will explain how to use mltb.* which is reference to files you want to wo
         "Your Mega.nz account password for per-user Mega downloads & uploads.",
         "<i>Send your Mega.nz account password.</i> \n┖ <b>Time Left :</b> <code>60 sec</code>",
     ),
+    "IMPORT_SETTINGS": (
+        "File",
+        "Import your backed up user settings zip file.",
+        "<i>Send the backup zip file to restore your settings.</i> \n┖ <b>Time Left :</b> <code>60 sec</code>",
+    ),
 }
 
 
@@ -340,6 +349,8 @@ async def get_user_settings(from_user, stype="main"):
         buttons.data_button(
             "General Settings", f"userset {user_id} general", position="header"
         )
+        buttons.data_button("Export Settings", f"userset {user_id} export")
+        buttons.data_button("Import Settings", f"userset {user_id} menu IMPORT_SETTINGS")
         buttons.data_button("Mirror Settings", f"userset {user_id} mirror")
         buttons.data_button("Leech Settings", f"userset {user_id} leech")
         buttons.data_button("Uphoster Settings", f"userset {user_id} uphoster")
@@ -1097,9 +1108,57 @@ async def send_user_settings(_, message):
 
 
 @new_task
-async def add_file(_, message, ftype, rfunc):
+async def add_file(client, message, ftype, rfunc):
     user_id = message.from_user.id
     handler_dict[user_id] = False
+    if ftype == "IMPORT_SETTINGS":
+        if message.document and message.document.file_name.endswith(".zip"):
+            fpath = await message.download()
+            try:
+                import shutil
+                extract_path = f"temp_import_{user_id}"
+                with zipfile.ZipFile(fpath, 'r') as zip_ref:
+                    zip_ref.extractall(extract_path)
+
+                # Restore JSON data
+                json_path = f"{extract_path}/user_data.json"
+                if os.path.exists(json_path):
+                    with open(json_path, 'r') as f:
+                        new_data = json.load(f)
+                    user_data.setdefault(user_id, {}).update(new_data)
+                    await database.update_user_data(user_id)
+
+                # Restore files
+                mapping = {
+                    "thumbnail.jpg": f"thumbnails/{user_id}.jpg",
+                    "rclone.conf": f"rclone/{user_id}.conf",
+                    "token.pickle": f"tokens/{user_id}.pickle",
+                    "cookies.txt": f"cookies/{user_id}/cookies.txt"
+                }
+
+                for src, dst in mapping.items():
+                    src_path = f"{extract_path}/{src}"
+                    if os.path.exists(src_path):
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        if os.path.exists(dst): os.remove(dst)
+                        os.rename(src_path, dst)
+                        if src == "thumbnail.jpg": update_user_ldata(user_id, "THUMBNAIL", dst)
+                        elif src == "rclone.conf": update_user_ldata(user_id, "RCLONE_CONFIG", dst)
+                        elif src == "token.pickle": update_user_ldata(user_id, "TOKEN_PICKLE", dst)
+                        elif src == "cookies.txt": update_user_ldata(user_id, "USER_COOKIE_FILE", dst)
+
+                await send_message(message, "<b>Settings Imported Successfully!</b>")
+            except Exception as e:
+                await send_message(message, f"<b>Error during import:</b> {e}")
+            finally:
+                if os.path.exists(f"temp_import_{user_id}"):
+                    shutil.rmtree(f"temp_import_{user_id}")
+                if os.path.exists(fpath): os.remove(fpath)
+        else:
+            await send_message(message, "<b>Please send a valid zip file!</b>")
+        await rfunc()
+        return
+
     if ftype == "THUMBNAIL":
         des_dir = await create_thumb(message, user_id)
     elif ftype == "RCLONE_CONFIG":
@@ -1272,7 +1331,7 @@ async def get_menu(option, message, user_id):
     }
 
     buttons = ButtonMaker()
-    if option in ["THUMBNAIL", "RCLONE_CONFIG", "TOKEN_PICKLE", "USER_COOKIE_FILE"]:
+    if option in ["THUMBNAIL", "RCLONE_CONFIG", "TOKEN_PICKLE", "USER_COOKIE_FILE", "IMPORT_SETTINGS"]:
         key = "file"
     else:
         key = "set"
@@ -1456,6 +1515,45 @@ async def edit_user_settings(client, query):
     elif data[2] == "yttools":
         await query.answer()
         await update_user_settings(query, data[2])
+    elif data[2] == "export":
+        await query.answer("Exporting settings...", show_alert=False)
+        u_data = user_data.get(user_id, {}).copy()
+        u_data.pop("AUTH", None)
+        u_data.pop("SUDO", None)
+
+        backup_name = f"backup_{user_id}.zip"
+        with zipfile.ZipFile(backup_name, 'w') as zip_ref:
+            # Save user_data as json
+            with open(f"user_data_{user_id}.json", 'w') as f:
+                json.dump(u_data, f)
+            zip_ref.write(f"user_data_{user_id}.json", "user_data.json")
+            os.remove(f"user_data_{user_id}.json")
+
+            # Add files
+            mapping = {
+                f"thumbnails/{user_id}.jpg": "thumbnail.jpg",
+                f"rclone/{user_id}.conf": "rclone.conf",
+                f"tokens/{user_id}.pickle": "token.pickle",
+                f"cookies/{user_id}/cookies.txt": "cookies.txt"
+            }
+            for src, arcname in mapping.items():
+                if os.path.exists(src):
+                    zip_ref.write(src, arcname)
+
+        try:
+            await TgClient.bot.send_document(
+                chat_id=user_id,
+                document=backup_name,
+                caption="<b>Your User Settings Backup</b>",
+                file_name=f"WZMLX_Settings_Backup_{user_id}.zip"
+            )
+            if query.message.chat.id != user_id:
+                await query.answer("Settings sent to your PM!", show_alert=True)
+        except Exception as e:
+            await query.answer(f"Error sending backup: {e}", show_alert=True)
+        finally:
+            if os.path.exists(backup_name):
+                os.remove(backup_name)
     elif data[2] == "uphoster_destinations":
         await query.answer()
         user_dict = user_data.get(user_id, {})
