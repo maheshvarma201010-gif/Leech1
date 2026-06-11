@@ -188,6 +188,14 @@ class Mirror(TaskListener):
         self.user_trans = args["-ut"]
         self.vt_flag = args["-vt"]
         self.is_yt = args["-yt"]
+
+        if args["-m"]:
+            self.vt_data["rename"] = args["-m"]
+
+        if self.vt_flag and self.multi > 1 and not hasattr(self, "vt_collection"):
+            from .video_tools import start_collection_flow
+            bot_loop.create_task(start_collection_flow(self))
+            return
         self.metadata_dict = self.default_metadata_dict.copy()
         self.audio_metadata_dict = self.audio_metadata_dict.copy()
         self.video_metadata_dict = self.video_metadata_dict.copy()
@@ -375,7 +383,6 @@ class Mirror(TaskListener):
 
         if self.vt_flag and not self.vt_data:
             from .video_tools import display_video_tools_menu
-
             await display_video_tools_menu(self)
             return
 

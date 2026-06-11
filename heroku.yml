@@ -1,0 +1,5 @@
+setup:
+  build: .
+  config:
+    worker:
+      command: bash start.sh

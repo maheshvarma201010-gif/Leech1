@@ -63,7 +63,7 @@ from .telegram_helper.message_utils import (
 
 
 class TaskConfig:
-    def __init__(self):
+    def __init__(self, vt_data=None, **kwargs):
         self.mid = self.message.id
         self.user = self.message.from_user or self.message.sender_chat
         self.user_id = self.user.id
@@ -136,7 +136,7 @@ class TaskConfig:
         self.user_trans = False
         self.is_rss = getattr(self.message, "_rss_trigger", False)
         self.progress = True
-        self.vt_data = kwargs.get("vt_data", {})
+        self.vt_data = vt_data or {}
         self.ffmpeg_cmds = None
         self.metadata_title = None
         self.chat_thread_id = None
@@ -748,9 +748,6 @@ class TaskConfig:
             for ffmpeg_cmd in cmds:
                 self.proceed_count = 0
                 cmd = [
-                    "taskset",
-                    "-c",
-                    f"{cores}",
                     BinConfig.FFMPEG_NAME,
                     "-hide_banner",
                     "-loglevel",

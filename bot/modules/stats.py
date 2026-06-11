@@ -294,6 +294,17 @@ async def stats_pages(_, query):
         await edit_message(message, msg, btns)
 
 
+@new_task
+async def health_check(_, message):
+    from ..helper.ext_utils.health_check import run_health_checks
+    msg = await send_message(message, "<b>Running health checks...</b>")
+    results = await run_health_checks()
+    res_text = "<b>Health Check Results:</b>\n\n"
+    for k, v in results.items():
+        res_text += f"┃ <b>{k}:</b> {v}\n"
+    await edit_message(msg, res_text)
+
+
 async def get_version_async(command, regex, timeout=5):
     try:
         out, err, code = await wait_for(cmd_exec(command), timeout=timeout)

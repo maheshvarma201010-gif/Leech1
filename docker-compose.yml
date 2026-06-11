@@ -1,11 +1,22 @@
+version: '3.8'
+
 services:
-  app:
+  wzmlx:
     build: .
-    command: bash start.sh
-    restart: on-failure
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
+    container_name: wzmlx
+    restart: unless-stopped
+    volumes:
+      - ./downloads:/usr/src/app/downloads
+      - ./config.py:/usr/src/app/config.py
+      - ./token.pickle:/usr/src/app/token.pickle
+      - ./rclone.conf:/usr/src/app/rclone.conf
+      - ./accounts:/usr/src/app/accounts
+    env_file:
+      - .env
     ports:
-      - "127.0.0.1:8080:8080"
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

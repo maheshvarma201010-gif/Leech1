@@ -40,3 +40,8 @@ uvicorn
 uvloop
 xattr
 yt-dlp[default,curl-cffi]
+motor
+python-dotenv
+cryptography
+pydantic
+starlette

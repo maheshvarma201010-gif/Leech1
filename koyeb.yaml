@@ -1,0 +1,17 @@
+version: "1.0"
+service:
+  name: wzmlx
+  type: worker
+  build:
+    dockerfile: Dockerfile
+  env:
+    - key: BOT_TOKEN
+      value: ""
+    - key: TELEGRAM_API
+      value: ""
+    - key: TELEGRAM_HASH
+      value: ""
+    - key: OWNER_ID
+      value: ""
+    - key: DATABASE_URL
+      value: ""

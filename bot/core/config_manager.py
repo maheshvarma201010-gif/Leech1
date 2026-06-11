@@ -6,7 +6,7 @@ class Config:
     AS_DOCUMENT = False
     AUTHORIZED_CHATS = ""
     BASE_URL = ""
-    BASE_URL_PORT = 80
+    BASE_URL_PORT = 8080
     BOT_TOKEN = ""
     HELPER_TOKENS = ""
     BOT_MAX_TASKS = 0
@@ -72,6 +72,8 @@ class Config:
     EXTRACT_LIMIT = 0
     ARCHIVE_LIMIT = 0
     STORAGE_LIMIT = 0
+    STATUS_LIMIT = 10
+    STATUS_UPDATE_INTERVAL = 15
     LEECH_DUMP_CHAT = ""
     LINKS_LOG_ID = ""
     MIRROR_LOG_ID = ""

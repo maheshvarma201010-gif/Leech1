@@ -80,7 +80,12 @@ _DB_PART = "p_" + sha256(_DB_PARTITION_SALT + str(BOT_ID).encode("utf-8")).hexdi
 
 if DATABASE_URL := config_file.get("DATABASE_URL", "").strip():
     try:
-        conn = MongoClient(DATABASE_URL, server_api=ServerApi("1"))
+        conn = MongoClient(
+            DATABASE_URL,
+            server_api=ServerApi("1"),
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=10000,
+        )
         db = conn.wzmlx
         old_config = db.settings.deployConfig.find_one({"_id": _DB_PART}, {"_id": 0})
         config_dict = db.settings.config.find_one({"_id": _DB_PART})
@@ -132,5 +137,7 @@ if UPSTREAM_REPO:
 
 UPDATE_PKGS = config_file.get("UPDATE_PKGS", "True")
 if (isinstance(UPDATE_PKGS, str) and UPDATE_PKGS.lower() == "true") or UPDATE_PKGS:
-    scall("uv pip install -U -r requirements.txt", shell=True)
+    from shutil import which
+    pip_cmd = "uv pip" if which("uv") else "pip"
+    scall(f"{pip_cmd} install -U -r requirements.txt", shell=True)
     log_info("Successfully Updated all the Packages !")
