@@ -42,110 +42,130 @@ async def ffmpeg_merge(input_dir, output_file, listener):
         LOGGER.error(f"FFmpeg Merge Error: {err}")
         return None
 
-async def ffmpeg_process(input_path, output_path, options, listener):
+async def ffmpeg_process(input_path, output_dir, options, listener, resolutions=None, audio_source=None, trim_duration=None):
     LOGGER.info(f"Processing video {input_path} with options: {options}")
 
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", input_path]
+    base_name = os.path.basename(input_path)
+    final_outputs = []
 
-    v_codec = "copy"
-    a_codec = "copy"
-    s_codec = "copy"
-    vf = []
-    af = []
-    maps = ["-map", "0:v:0?", "-map", "0:a:?", "-map", "0:s?"]
-    input_idx = 1
+    async def run_ffmpeg(input_file, output_file, res=None):
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", input_file]
 
-    if "Compress" in options:
-        v_codec = "libx264"
-        cmd.extend(["-crf", "24", "-preset", "medium"])
-        a_codec = "aac"
+        v_codec = "copy"
+        a_codec = "copy"
+        s_codec = "copy"
+        vf = []
+        af = []
+        maps = ["-map", "0:v:0?", "-map", "0:a:?", "-map", "0:s?"]
+        input_idx = 1
 
-    if "Convert" in options:
-        if not output_path.lower().endswith(".mp4"):
-            output_path = os.path.splitext(output_path)[0] + ".mp4"
-
-    if "Extract" in options:
-        maps = ["-map", "0:a:0"]
-        output_path = os.path.splitext(output_path)[0] + ".m4a"
-        v_codec = None
-
-    if "Watermark" in options:
-        from bot import config_dict
-        wm_path = config_dict.get('WATERMARK_PATH')
-        if wm_path and os.path.exists(wm_path):
-            cmd.extend(["-i", wm_path])
-            vf.append(f"overlay=main_w-overlay_w-10:10")
+        if res:
             v_codec = "libx264"
+            cmd.extend(["-crf", "24", "-preset", "medium"])
+            width = res.replace("p", "")
+            vf.append(f"scale=-2:{width}")
+            a_codec = "aac"
+        elif "Compress" in options:
+            v_codec = "libx264"
+            cmd.extend(["-crf", "24", "-preset", "medium"])
+            a_codec = "aac"
+
+        if "Convert" in options:
+            if not output_file.lower().endswith(".mp4"):
+                output_file = os.path.splitext(output_file)[0] + ".mp4"
+
+        if "Extract" in options:
+            maps = ["-map", "0:a:0"]
+            output_file = os.path.splitext(output_file)[0] + ".m4a"
+            v_codec = None
+
+        if "Watermark" in options:
+            from bot import config_dict
+            wm_path = config_dict.get('WATERMARK_PATH')
+            if wm_path and os.path.exists(wm_path):
+                cmd.extend(["-i", wm_path])
+                vf.append(f"overlay=main_w-overlay_w-10:10")
+                v_codec = "libx264"
+                input_idx += 1
+
+        if "Speed" in options:
+            vf.append("setpts=0.67*PTS")
+            af.append("atempo=1.5")
+            v_codec = "libx264"
+            a_codec = "aac"
+
+        if "Remove Stream" in options:
+            cmd.extend(["-sn"])
+            if "-map" in maps:
+                new_maps = []
+                for i in range(0, len(maps), 2):
+                    if ":s" not in maps[i+1]:
+                        new_maps.extend([maps[i], maps[i+1]])
+                maps = new_maps
+
+        if "Trim" in options and trim_duration:
+            cmd.extend(["-t", str(trim_duration)])
+
+        if "SubSync" in options:
+            # Simple SubSync attempt by shifting subtitles if needed (placeholder)
+            cmd.extend(["-itsoffset", "0.5"])
+
+        if "Reorder Streams" in options:
+            # Dynamic reorder: put all audio before video (example)
+            maps = ["-map", "0:a", "-map", "0:v", "-map", "0:s?"]
+
+        if audio_source:
+            cmd.extend(["-i", audio_source])
+            maps = ["-map", "0:v:0", "-map", f"{input_idx}:a:0"]
             input_idx += 1
 
-    if "Speed" in options:
-        vf.append("setpts=0.67*PTS")
-        af.append("atempo=1.5")
-        v_codec = "libx264"
-        a_codec = "aac"
+        if "Video + Subtitle" in options:
+            input_dir = os.path.dirname(input_file)
+            other_files = [f for f in await listdir(input_dir) if os.path.join(input_dir, f) != input_file]
+            for f in other_files:
+                f_path = os.path.join(input_dir, f)
+                if f.lower().endswith(('.srt', '.vtt', '.ass')):
+                    cmd.extend(["-i", f_path])
+                    maps.extend(["-map", f"{input_idx}:s:0"])
+                    s_codec = "srt" if f.lower().endswith(".srt") else "ass"
+                    input_idx += 1
+                    break
 
-    if "Remove Stream" in options:
-        cmd.extend(["-sn"])
-        if "-map" in maps:
-            new_maps = []
-            for i in range(0, len(maps), 2):
-                if ":s" not in maps[i+1]:
-                    new_maps.extend([maps[i], maps[i+1]])
-            maps = new_maps
+        cmd.extend(maps)
 
-    if "Trim" in options:
-        cmd.extend(["-t", "60"])
+        # Metadata injection
+        user_id = listener.message.from_user.id
+        metadata = user_data.get(user_id, {}).get("lmeta") or listener.user_dict.get("lmeta")
+        if metadata:
+            cmd.extend(["-metadata", f"title={metadata}", "-metadata:s:v", f"title={metadata}", "-metadata:s:a", f"title={metadata}"])
+            cmd.extend(["-map_metadata", "-1"])
 
-    if "SubSync" in options:
-        LOGGER.info("SubSync selected. This requires ffsubsync to be installed.")
+        if vf: cmd.extend(["-vf", ",".join(vf)])
+        if af: cmd.extend(["-af", ",".join(af)])
 
-    if "Reorder Streams" in options:
-        maps = ["-map", "0:v:0", "-map", "0:a:1", "-map", "0:a:0", "-map", "0:s?"]
+        if v_codec: cmd.extend(["-c:v", v_codec])
+        if a_codec: cmd.extend(["-c:a", a_codec])
+        if s_codec: cmd.extend(["-c:s", s_codec])
 
-    if "Video + Audio" in options or "Video + Subtitle" in options:
-        input_dir = os.path.dirname(input_path)
-        other_files = [f for f in await listdir(input_dir) if os.path.join(input_dir, f) != input_path]
-        for f in other_files:
-            f_path = os.path.join(input_dir, f)
-            if "Video + Audio" in options and f.lower().endswith(('.mp3', '.m4a', '.aac', '.wav')):
-                cmd.extend(["-i", f_path])
-                maps = ["-map", "0:v:0", "-map", f"{input_idx}:a:0"]
-                input_idx += 1
-                break
-            if "Video + Subtitle" in options and f.lower().endswith(('.srt', '.vtt', '.ass')):
-                cmd.extend(["-i", f_path])
-                maps = ["-map", "0:v:0", "-map", "0:a:?", "-map", f"{input_idx}:s:0"]
-                s_codec = "srt" if f.lower().endswith(".srt") else "ass"
-                input_idx += 1
-                break
+        cmd.extend([output_file, "-y"])
 
-    cmd.extend(maps)
+        listener.suproc = await create_subprocess_exec(*cmd, stderr=PIPE)
+        code = await listener.suproc.wait()
+        return output_file if code == 0 else None
 
-    # Metadata injection
-    user_id = listener.message.from_user.id
-    metadata = user_data.get(user_id, {}).get("lmeta") or listener.user_dict.get("lmeta")
-    if metadata:
-        cmd.extend(["-metadata", f"title={metadata}", "-metadata:s:v", f"title={metadata}", "-metadata:s:a", f"title={metadata}"])
-        cmd.extend(["-map_metadata", "-1"]) # Clear old tags
-
-    if vf:
-        cmd.extend(["-vf", ",".join(vf)])
-    if af:
-        cmd.extend(["-af", ",".join(af)])
-
-    if v_codec: cmd.extend(["-c:v", v_codec])
-    if a_codec: cmd.extend(["-c:a", a_codec])
-    if s_codec: cmd.extend(["-c:s", s_codec])
-
-    cmd.extend([output_path, "-y"])
-
-    listener.suproc = await create_subprocess_exec(*cmd, stderr=PIPE)
-    code = await listener.suproc.wait()
-
-    if code == 0:
-        await aioremove(input_path)
-        return output_path
+    if "Compress" in options and resolutions:
+        for res in resolutions:
+            out_name = f"{os.path.splitext(base_name)[0]}_{res}.mp4"
+            out_path = os.path.join(output_dir, out_name)
+            res_out = await run_ffmpeg(input_path, out_path, res)
+            if res_out: final_outputs.append(res_out)
     else:
-        err = (await listener.suproc.stderr.read()).decode().strip()
-        LOGGER.error(f"FFmpeg Process Error: {err}")
-        return None
+        out_name = f"processed_{os.path.splitext(base_name)[0]}.mp4"
+        out_path = os.path.join(output_dir, out_name)
+        res_out = await run_ffmpeg(input_path, out_path)
+        if res_out: final_outputs.append(res_out)
+
+    if final_outputs:
+        await aioremove(input_path)
+        return final_outputs
+    return None

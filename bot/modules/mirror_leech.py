@@ -473,6 +473,8 @@ async def _mirror_leech(
 
     vt_options = sameDir.get("vt_options") if isinstance(sameDir, dict) else None
     new_name = sameDir.get("new_name") if isinstance(sameDir, dict) else None
+    audio_source = sameDir.get("audio_source") if isinstance(sameDir, dict) else None
+    resolutions = sameDir.get("resolutions") if isinstance(sameDir, dict) else None
 
     if vt and not vt_options:
         from bot.modules.video_tools import video_tools_menu
@@ -501,6 +503,8 @@ async def _mirror_leech(
             "thumb": thumb,
             "vt_options": vt_options,
             "new_name": new_name,
+            "audio_source": audio_source,
+            "resolutions": resolutions,
         },
     )
 

@@ -20,6 +20,8 @@ VT_OPTIONS = [
     "Reorder Streams", "Speed"
 ]
 
+RESOLUTIONS = ["144p", "240p", "360p", "480p", "540p", "720p", "1080p"]
+
 async def _timeout_handler(user_id, message_id):
     await sleep(180)
     if message_id in vt_sessions:
@@ -33,7 +35,8 @@ async def _timeout_handler(user_id, message_id):
 
 def _get_vt_buttons(user_id, message_id):
     buttons = ButtonMaker()
-    options = vt_sessions[message_id]['options']
+    session = vt_sessions[message_id]
+    options = session['options']
 
     # Row 1: Rename (Full Width)
     name = f"✅ Rename" if "Rename" in options else "Rename"
@@ -49,15 +52,24 @@ def _get_vt_buttons(user_id, message_id):
         buttons.ibutton(name2, f"vt {user_id} {message_id} {opt2}")
 
     # Row 8: Done (Full Width)
-    done_name = "Done / Start Process"
+    done_name = "🟩 Done / Start Process"
     if options:
-        done_name = f"🟢 {done_name} ({len(options)})"
+        done_name = f"🟩 Done / Start Process ({len(options)})"
     buttons.ibutton(done_name, f"vt {user_id} {message_id} done")
 
     # Row 9: Cancel (Full Width)
-    buttons.ibutton("Cancel", f"vt {user_id} {message_id} cancel")
+    buttons.ibutton("❌ Cancel", f"vt {user_id} {message_id} cancel")
 
     return buttons.build_menu(2)
+
+def _get_compress_buttons(user_id, message_id):
+    buttons = ButtonMaker()
+    selected = vt_sessions[message_id].get('resolutions', [])
+    for res in RESOLUTIONS:
+        name = f"✅ {res}" if res in selected else res
+        buttons.ibutton(name, f"vt {user_id} {message_id} res {res}")
+    buttons.ibutton("💾 Save", f"vt {user_id} {message_id} main", position="footer")
+    return buttons.build_menu(3)
 
 async def video_tools_menu(client, message, isQbit, isLeech, sameDir, bulk):
     user_id = message.from_user.id
@@ -79,13 +91,27 @@ async def video_tools_menu(client, message, isQbit, isLeech, sameDir, bulk):
 
 from pyrogram.handlers import MessageHandler
 
-async def _rename_handler(client, message, message_id, handler):
+async def _vt_input_handler(client, message, message_id, handler, mode):
     user_id = message.from_user.id
     if message_id in vt_sessions and vt_sessions[message_id]['user_id'] == user_id:
-        bot.remove_handler(*handler) if isinstance(handler, tuple) else bot.remove_handler(handler)
-        vt_sessions[message_id]['new_name'] = message.text
-        await deleteMessage(message)
-        await editMessage(vt_sessions[message_id]['menu_msg'], "<b>Advanced Video Tools Pipeline</b>\nSelect the tools you want to apply:\n\n<b>New Name:</b> <code>" + message.text + "</code>", _get_vt_buttons(user_id, message_id))
+        bot.remove_handler(*handler, group=-1) if isinstance(handler, tuple) else bot.remove_handler(handler, group=-1)
+        if mode == 'rename':
+            vt_sessions[message_id]['new_name'] = message.text
+            await deleteMessage(message)
+            msg = f"<b>Advanced Video Tools Pipeline</b>\nSelect the tools you want to apply:\n\n<b>New Name:</b> <code>{message.text}</code>"
+            await editMessage(vt_sessions[message_id]['menu_msg'], msg, _get_vt_buttons(user_id, message_id))
+        elif mode == 'audio':
+            # Handle audio link or file
+            link = message.text or (message.reply_to_message.link if message.reply_to_message else message.link if message.media else None)
+            vt_sessions[message_id]['audio_source'] = link
+            await deleteMessage(message)
+            msg = f"<b>Advanced Video Tools Pipeline</b>\nSelect the tools you want to apply:\n\n<b>Audio Source Set!</b>"
+            await editMessage(vt_sessions[message_id]['menu_msg'], msg, _get_vt_buttons(user_id, message_id))
+        elif mode == 'trim':
+            vt_sessions[message_id]['trim_duration'] = message.text
+            await deleteMessage(message)
+            msg = f"<b>Advanced Video Tools Pipeline</b>\nSelect the tools you want to apply:\n\n<b>Trim Duration:</b> <code>{message.text}</code>"
+            await editMessage(vt_sessions[message_id]['menu_msg'], msg, _get_vt_buttons(user_id, message_id))
 
 @new_task
 async def vt_callback(client, query):
@@ -114,6 +140,9 @@ async def vt_callback(client, query):
             sameDir = {}
         sameDir['vt_options'] = vt_options
         sameDir['new_name'] = session.get('new_name')
+        sameDir['audio_source'] = session.get('audio_source')
+        sameDir['resolutions'] = session.get('resolutions')
+        sameDir['trim_duration'] = session.get('trim_duration')
 
         from bot.modules.mirror_leech import _mirror_leech
         await deleteMessage(session['menu_msg'])
@@ -125,27 +154,54 @@ async def vt_callback(client, query):
 
         del vt_sessions[message_id]
         await _mirror_leech(client, orig_message, isQbit, isLeech, sameDir, bulk)
+    elif option == "main":
+        msg = "<b>Advanced Video Tools Pipeline</b>\nSelect the tools you want to apply:"
+        if session.get('new_name'): msg += f"\n\n<b>New Name:</b> <code>{session['new_name']}</code>"
+        if session.get('resolutions'): msg += f"\n<b>Resolutions:</b> {', '.join(session['resolutions'])}"
+        await editMessage(session['menu_msg'], msg, _get_vt_buttons(user_id, message_id))
+    elif option.startswith("res "):
+        res = option.split()[1]
+        if 'resolutions' not in session: session['resolutions'] = []
+        if res in session['resolutions']: session['resolutions'].remove(res)
+        else: session['resolutions'].append(res)
+        await editMessage(session['menu_msg'], "<b>Select Resolutions to Compress:</b>", _get_compress_buttons(user_id, message_id))
     else:
         if option in session['options']:
             session['options'].remove(option)
-            if option == "Rename" and 'new_name' in session:
-                del session['new_name']
+            if option == "Rename" and 'new_name' in session: del session['new_name']
+            if option == "Compress" and 'resolutions' in session: del session['resolutions']
+            if option == "Video + Audio" and 'audio_source' in session: del session['audio_source']
+            if option == "Trim" and 'trim_duration' in session: del session['trim_duration']
         else:
             session['options'].add(option)
             if option == "Rename":
-                await query.answer("Send the new name now...", show_alert=True)
+                await query.answer("Please reply with your new custom output name.", show_alert=True)
                 handler = []
-                h = bot.add_handler(MessageHandler(
-                    lambda c, m: _rename_handler(c, m, message_id, handler[0]),
-                    filters=user(user_id)
-                ), group=-1)
+                h = bot.add_handler(MessageHandler(lambda c, m: _vt_input_handler(c, m, message_id, handler[0], 'rename'), filters=user(user_id)), group=-1)
                 handler.append(h)
-                create_task(sleep(30)).add_done_callback(lambda _: bot.remove_handler(*h) if isinstance(h, tuple) else bot.remove_handler(h))
+                create_task(sleep(30)).add_done_callback(lambda _: bot.remove_handler(*h, group=-1) if isinstance(h, tuple) else bot.remove_handler(h, group=-1))
+                return
+            elif option == "Video + Audio":
+                await query.answer("Please send or reply with the audio file, link, or video.", show_alert=True)
+                handler = []
+                h = bot.add_handler(MessageHandler(lambda c, m: _vt_input_handler(c, m, message_id, handler[0], 'audio'), filters=user(user_id)), group=-1)
+                handler.append(h)
+                create_task(sleep(60)).add_done_callback(lambda _: bot.remove_handler(*h, group=-1) if isinstance(h, tuple) else bot.remove_handler(h, group=-1))
+                return
+            elif option == "Trim":
+                await query.answer("Please reply with trim duration (e.g., 00:01:00 or 60).", show_alert=True)
+                handler = []
+                h = bot.add_handler(MessageHandler(lambda c, m: _vt_input_handler(c, m, message_id, handler[0], 'trim'), filters=user(user_id)), group=-1)
+                handler.append(h)
+                create_task(sleep(30)).add_done_callback(lambda _: bot.remove_handler(*h, group=-1) if isinstance(h, tuple) else bot.remove_handler(h, group=-1))
+                return
+            elif option == "Compress":
+                await editMessage(session['menu_msg'], "<b>Select Resolutions to Compress:</b>", _get_compress_buttons(user_id, message_id))
                 return
 
         msg = "<b>Advanced Video Tools Pipeline</b>\nSelect the tools you want to apply:"
-        if session.get('new_name'):
-            msg += f"\n\n<b>New Name:</b> <code>{session['new_name']}</code>"
+        if session.get('new_name'): msg += f"\n\n<b>New Name:</b> <code>{session['new_name']}</code>"
+        if session.get('resolutions'): msg += f"\n<b>Resolutions:</b> {', '.join(session['resolutions'])}"
         await editMessage(session['menu_msg'], msg, _get_vt_buttons(user_id, message_id))
         await query.answer()
 
