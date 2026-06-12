@@ -1,12 +1,11 @@
 import os
+import re
 import json
 from natsort import natsorted
 from asyncio import create_subprocess_exec, create_subprocess_shell, Event, wait_for
 from asyncio.subprocess import PIPE
 from bot import LOGGER, cores, threads
 from bot.core.config_manager import BinConfig
-from natsort import natsorted
-import os, re
 from os import path as ospath
 from aioshutil import move
 from aiofiles.os import makedirs, remove, path as aiopath

@@ -54,9 +54,9 @@ commands = {
         r"ffmpeg version ([\d.]+(-\w+)?).*",
     ),
     "7z": (["7z", "i"], r"7-Zip ([\d.]+)"),
-    "aiohttp": (["uv", "pip", "show", "aiohttp"], r"Version: ([\d.]+)"),
-    "pyrotgfork": (["uv", "pip", "show", "pyrotgfork"], r"Version: ([\d.]+)"),
-    "gapi": (["uv", "pip", "show", "google-api-python-client"], r"Version: ([\d.]+)"),
+    "aiohttp": (["pip", "show", "aiohttp"], r"Version: ([\d.]+)"),
+    "pyrotgfork": (["pip", "show", "pyrotgfork"], r"Version: ([\d.]+)"),
+    "gapi": (["pip", "show", "google-api-python-client"], r"Version: ([\d.]+)"),
     "mega": (
         [
             "python3",
